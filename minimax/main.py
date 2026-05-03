@@ -42,7 +42,11 @@ def run_game(board: chess.Board, depth: int, engine_color: chess.Color | None) -
         engine_color = ask_engine_color()
 
     player_color = not engine_color
-    renderer = UTF8BoardRenderer(borders=False, orientation=player_color)
+    renderer = UTF8BoardRenderer(
+        borders=False,
+        orientation=player_color,
+        coordinates=True,
+    )
     engine = ChessEngine(depth=depth)
 
     while not board.is_game_over(claim_draw=True):

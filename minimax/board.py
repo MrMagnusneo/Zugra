@@ -222,18 +222,41 @@ class PositionMatrixAdapter(ArrayPGNAdapter):
 
 @dataclass(slots=True)
 class UTF8BoardRenderer:
-    """Renders a board the same way as python-chess board.unicode()."""
+    """Renders a chess board as UTF-8 text."""
 
     borders: bool = False
     empty_square: str = "."
     orientation: chess.Color = chess.WHITE
+    coordinates: bool = False
 
     def render(self, board: chess.Board) -> str:
+        if self.coordinates and not self.borders:
+            return self._render_with_coordinates(board)
+
         return board.unicode(
             borders=self.borders,
             empty_square=self.empty_square,
             orientation=self.orientation,
         )
+
+    def _render_with_coordinates(self, board: chess.Board) -> str:
+        files = range(8) if self.orientation == chess.WHITE else range(7, -1, -1)
+        ranks = range(7, -1, -1) if self.orientation == chess.WHITE else range(8)
+        file_labels = [chess.FILE_NAMES[file_index] for file_index in files]
+        label_row = f"  {' '.join(file_labels)}"
+        rows = [label_row]
+
+        for rank in ranks:
+            cells = []
+            for file_index in files:
+                piece = board.piece_at(chess.square(file_index, rank))
+                cells.append(piece.unicode_symbol() if piece else self.empty_square)
+
+            rank_label = str(rank + 1)
+            rows.append(f"{rank_label} {' '.join(cells)} {rank_label}")
+
+        rows.append(label_row)
+        return "\n".join(rows)
 
 
 @dataclass(slots=True)
@@ -270,4 +293,3 @@ def final_board_from_game(game: chess.pgn.Game) -> chess.Board:
     for move in game.mainline_moves():
         board.push(move)
     return board
-
