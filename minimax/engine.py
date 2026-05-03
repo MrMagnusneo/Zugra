@@ -1,113 +1,262 @@
-from random import randrange
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+import chess
 
 
-class TicTacToe:
-    def __init__(self):
-        while True:
-            self.first_move_row = randrange(0, 3, 2)
-            self.first_move_col = randrange(0, 3, 2)
-            self.board = [[0, 0, 0] for _ in range(3)]
-            self.bot_team = int(input('Input computer team (1 -> X, 2 -> O): '))
-            self.player_team = 3 - self.bot_team
-            self.moves = 0
-            if self.bot_team == 1 or self.bot_team == 2:
-                break
+BOARD_SIZE = 8
+CHECKMATE_SCORE = 100_000
+INFINITY = 1_000_000
 
-    def check_win(self, board, team):
-        for i in range(3):
-            if board[i][0] == board[i][1] == board[i][2] == team:
-                return True
-            if board[0][i] == board[1][i] == board[2][i] == team:
-                return True
+PIECE_VALUES = {
+    chess.PAWN: 100,
+    chess.KNIGHT: 320,
+    chess.BISHOP: 330,
+    chess.ROOK: 500,
+    chess.QUEEN: 900,
+    chess.KING: 0,
+}
 
-        if (board[0][0] == board[1][1] == board[2][2] == team or
-                board[0][2] == board[1][1] == board[2][0] == team):
-            return True
 
-        if all(cell != 0 for row in board for cell in row):
-            return None
+@dataclass(slots=True)
+class SearchStats:
+    nodes: int = 0
+    cutoffs: int = 0
 
-        return False
 
-    def minimax(self, minimax_board, is_maximizing):
-        if self.check_win(minimax_board, self.bot_team) is True:
-            return float('inf')
-        if self.check_win(minimax_board, self.player_team) is True:
-            return float('-inf')
-        if all(cell != 0 for row in minimax_board for cell in row):
+@dataclass(frozen=True, slots=True)
+class SearchResult:
+    best_move: chess.Move | None
+    score: int
+    depth: int
+    nodes: int
+    cutoffs: int
+
+
+@dataclass(slots=True)
+class SimpleEvaluator:
+    material_weight: int = 1
+    mobility_weight: int = 2
+    center_weight: int = 6
+    bishop_pair_bonus: int = 35
+    check_penalty: int = 40
+
+    def evaluate(self, board: chess.Board) -> int:
+        """Return a white-centric score in centipawns."""
+        score = self._material_and_position_score(board)
+        score += self._bishop_pair_score(board)
+        score += self._mobility_score(board)
+        score += self._check_score(board)
+        return score
+
+    def _material_and_position_score(self, board: chess.Board) -> int:
+        score = 0
+
+        for piece_type, value in PIECE_VALUES.items():
+            for square in board.pieces(piece_type, chess.WHITE):
+                score += value * self.material_weight
+                score += self._piece_activity(piece_type, square, chess.WHITE)
+
+            for square in board.pieces(piece_type, chess.BLACK):
+                score -= value * self.material_weight
+                score -= self._piece_activity(piece_type, square, chess.BLACK)
+
+        return score
+
+    def _piece_activity(
+        self,
+        piece_type: chess.PieceType,
+        square: chess.Square,
+        color: chess.Color,
+    ) -> int:
+        rank = chess.square_rank(square)
+        file_index = chess.square_file(square)
+
+        if color == chess.BLACK:
+            rank = 7 - rank
+
+        center_distance = abs(file_index - 3.5) + abs(rank - 3.5)
+        center_bonus = int((7 - center_distance) * self.center_weight)
+
+        if piece_type == chess.PAWN:
+            return rank * 8 + center_bonus // 2
+        if piece_type in (chess.KNIGHT, chess.BISHOP):
+            return center_bonus + rank * 2
+        if piece_type == chess.ROOK:
+            return rank * 3
+        if piece_type == chess.QUEEN:
+            return center_bonus // 2
+        if piece_type == chess.KING:
+            return self._king_safety(file_index, rank)
+
+        return 0
+
+    def _king_safety(self, file_index: int, rank: int) -> int:
+        if rank == 0 and file_index in (1, 2, 6):
+            return 30
+        if rank == 0 and file_index in (0, 7):
+            return 15
+        return 0
+
+    def _bishop_pair_score(self, board: chess.Board) -> int:
+        score = 0
+
+        if len(board.pieces(chess.BISHOP, chess.WHITE)) >= 2:
+            score += self.bishop_pair_bonus
+        if len(board.pieces(chess.BISHOP, chess.BLACK)) >= 2:
+            score -= self.bishop_pair_bonus
+
+        return score
+
+    def _mobility_score(self, board: chess.Board) -> int:
+        mobility = board.legal_moves.count() * self.mobility_weight
+        return mobility if board.turn == chess.WHITE else -mobility
+
+    def _check_score(self, board: chess.Board) -> int:
+        if not board.is_check():
             return 0
 
-        if is_maximizing:
-            best_score = -float('inf')
-            for row in range(3):
-                for col in range(3):
-                    if minimax_board[row][col] == 0:
-                        minimax_board[row][col] = self.bot_team
-                        score = self.minimax(minimax_board, False)
-                        minimax_board[row][col] = 0
-                        best_score = max(score, best_score)
-            return best_score
-        else:
-            best_score = float('inf')
-            for row in range(3):
-                for col in range(3):
-                    if minimax_board[row][col] == 0:
-                        minimax_board[row][col] = self.player_team
-                        score = self.minimax(minimax_board, True)
-                        minimax_board[row][col] = 0
-                        best_score = min(score, best_score)
-            return best_score
+        return -self.check_penalty if board.turn == chess.WHITE else self.check_penalty
 
-    def bot_move(self):
-        best_score = float('-inf')
-        best_move = (-1, -1)
 
-        for row in range(3):
-            for col in range(3):
-                if self.board[row][col] == 0:
-                    self.board[row][col] = self.bot_team
-                    score = self.minimax(self.board, False)
-                    self.board[row][col] = 0
-                    if score > best_score:
-                        best_score = score
-                        best_move = (row, col)
+@dataclass(slots=True)
+class ChessEngine:
+    depth: int = 3
+    evaluator: SimpleEvaluator = field(default_factory=SimpleEvaluator)
 
-        if best_move != (-1, -1):
-            self.board[best_move[0]][best_move[1]] = self.bot_team
-            self.moves += 1
+    def find_best_move(
+        self,
+        board: chess.Board,
+        depth: int | None = None,
+    ) -> SearchResult:
+        search_depth = depth if depth is not None else self.depth
+        if search_depth < 1:
+            raise ValueError("Search depth must be at least 1.")
 
-    def game(self):
-        while True:
-            if not (self.bot_team == 1 and self.moves == 0):
-                print('\nCurrent board:')
-                for row in self.board:
-                    print(' '.join(['X' if cell == 1 else 'O' if cell == 2 else '.' for cell in row]))
+        stats = SearchStats()
+        best_move: chess.Move | None = None
+        best_score = -INFINITY
+        alpha = -INFINITY
+        beta = INFINITY
 
-            if self.check_win(self.board, self.bot_team):
-                print("Computer wins!")
+        for move in self._ordered_moves(board):
+            board.push(move)
+            score = -self._negamax(board, search_depth - 1, -beta, -alpha, 1, stats)
+            board.pop()
+
+            if score > best_score:
+                best_score = score
+                best_move = move
+
+            alpha = max(alpha, best_score)
+
+        if best_move is None:
+            best_score = self._terminal_or_static_score(board, 0)
+
+        return SearchResult(
+            best_move=best_move,
+            score=best_score,
+            depth=search_depth,
+            nodes=stats.nodes,
+            cutoffs=stats.cutoffs,
+        )
+
+    def choose_move(self, board: chess.Board, depth: int | None = None) -> chess.Move | None:
+        return self.find_best_move(board, depth).best_move
+
+    def _negamax(
+        self,
+        board: chess.Board,
+        depth: int,
+        alpha: int,
+        beta: int,
+        ply: int,
+        stats: SearchStats,
+    ) -> int:
+        stats.nodes += 1
+
+        terminal_score = self._terminal_score(board, ply)
+        if terminal_score is not None:
+            return terminal_score
+
+        if depth == 0:
+            return self._static_score(board)
+
+        best_score = -INFINITY
+
+        for move in self._ordered_moves(board):
+            board.push(move)
+            score = -self._negamax(board, depth - 1, -beta, -alpha, ply + 1, stats)
+            board.pop()
+
+            best_score = max(best_score, score)
+            alpha = max(alpha, score)
+
+            if alpha >= beta:
+                stats.cutoffs += 1
                 break
-            if self.check_win(self.board, self.player_team):
-                print("Player wins!")
-                break
-            if self.check_win(self.board, None) is None:
-                print("It's a draw!")
-                break
 
-            if (self.bot_team == 1 and self.moves % 2 == 0) or (self.bot_team == 2 and self.moves % 2 == 1):
-                self.bot_move()
-            else:
-                print('\nPossible moves:')
-                print('00 01 02\n10 11 12\n20 21 22')
-                while True:
-                    move = input('Your move (e.g. "02" for row 0, column 2): ').strip()
-                    if len(move) == 2 and move.isdigit():
-                        row, col = int(move[0]), int(move[1])
-                        if 0 <= row <= 2 and 0 <= col <= 2 and self.board[row][col] == 0:
-                            self.board[row][col] = self.player_team
-                            self.moves += 1
-                            break
-                    print('Invalid move. Please enter two digits like "02" for row 0, column 2')
+        return best_score
 
+    def _terminal_or_static_score(self, board: chess.Board, ply: int) -> int:
+        terminal_score = self._terminal_score(board, ply)
+        if terminal_score is not None:
+            return terminal_score
+        return self._static_score(board)
 
-if __name__ == "__main__":
-    TicTacToe().game()
+    def _terminal_score(self, board: chess.Board, ply: int) -> int | None:
+        outcome = board.outcome(claim_draw=True)
+        if outcome is None:
+            return None
+
+        if outcome.winner is None:
+            return 0
+
+        if outcome.winner == board.turn:
+            return CHECKMATE_SCORE - ply
+
+        return -CHECKMATE_SCORE + ply
+
+    def _static_score(self, board: chess.Board) -> int:
+        score = self.evaluator.evaluate(board)
+        return score if board.turn == chess.WHITE else -score
+
+    def _ordered_moves(self, board: chess.Board) -> list[chess.Move]:
+        return sorted(
+            board.legal_moves,
+            key=lambda move: self._move_score(board, move),
+            reverse=True,
+        )
+
+    def _move_score(self, board: chess.Board, move: chess.Move) -> int:
+        score = 0
+
+        if board.is_capture(move):
+            victim = board.piece_at(move.to_square)
+
+            if victim is None and board.is_en_passant(move):
+                victim = chess.Piece(chess.PAWN, not board.turn)
+
+            attacker = board.piece_at(move.from_square)
+            victim_value = PIECE_VALUES.get(victim.piece_type, 0) if victim else 0
+            attacker_value = PIECE_VALUES.get(attacker.piece_type, 0) if attacker else 0
+            score += 10_000 + victim_value * 10 - attacker_value
+
+        if move.promotion:
+            score += 8_000 + PIECE_VALUES[move.promotion]
+
+        if board.gives_check(move):
+            score += 2_000
+
+        if board.is_castling(move):
+            score += 500
+
+        score += self._destination_activity(move.to_square)
+        return score
+
+    def _destination_activity(self, square: chess.Square) -> int:
+        rank = chess.square_rank(square)
+        file_index = chess.square_file(square)
+        center_distance = abs(file_index - 3.5) + abs(rank - 3.5)
+        return int((7 - center_distance) * 10)
