@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 import chess
@@ -129,6 +130,7 @@ class ChessEngine:
         self,
         board: chess.Board,
         depth: int | None = None,
+        root_moves: Iterable[chess.Move] | None = None,
     ) -> SearchResult:
         search_depth = depth if depth is not None else self.depth
         if search_depth < 1:
@@ -140,7 +142,7 @@ class ChessEngine:
         alpha = -INFINITY
         beta = INFINITY
 
-        for move in self._ordered_moves(board):
+        for move in self._ordered_moves(board, root_moves):
             board.push(move)
             score = -self._negamax(board, search_depth - 1, -beta, -alpha, 1, stats)
             board.pop()
@@ -162,8 +164,13 @@ class ChessEngine:
             cutoffs=stats.cutoffs,
         )
 
-    def choose_move(self, board: chess.Board, depth: int | None = None) -> chess.Move | None:
-        return self.find_best_move(board, depth).best_move
+    def choose_move(
+        self,
+        board: chess.Board,
+        depth: int | None = None,
+        root_moves: Iterable[chess.Move] | None = None,
+    ) -> chess.Move | None:
+        return self.find_best_move(board, depth, root_moves).best_move
 
     def _negamax(
         self,
@@ -222,9 +229,16 @@ class ChessEngine:
         score = self.evaluator.evaluate(board)
         return score if board.turn == chess.WHITE else -score
 
-    def _ordered_moves(self, board: chess.Board) -> list[chess.Move]:
+    def _ordered_moves(
+        self,
+        board: chess.Board,
+        moves: Iterable[chess.Move] | None = None,
+    ) -> list[chess.Move]:
+        legal_moves = board.legal_moves if moves is None else [
+            move for move in moves if move in board.legal_moves
+        ]
         return sorted(
-            board.legal_moves,
+            legal_moves,
             key=lambda move: self._move_score(board, move),
             reverse=True,
         )
